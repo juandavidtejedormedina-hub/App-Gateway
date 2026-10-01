@@ -215,25 +215,14 @@ with left:
 
 with right:
     st.markdown('<div class="panel">', unsafe_allow_html=True)
-    st.markdown("### 🧠 ¿Qué podrá hacer?")
-
-    capabilities = [
-        ("📊", "Consultar datos", "Buscar información en tablas y registros."),
-        ("🌱", "Analizar invernaderos", "Temperatura, humedad, PAR, VPD y variables ambientales."),
-        ("📡", "Supervisar IoT", "Sensores, gateways, LoRaWAN y comunicaciones."),
-        ("💧", "Reservorios", "Nivel, volumen, porcentaje y comportamiento."),
-        ("⚡", "Energía", "Consumo, medición y tendencias."),
-        ("🔧", "Mantenimiento", "Históricos, equipos y reportes."),
-    ]
-
-    for icon, title, desc in capabilities:
-        st.markdown(
-            f'<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,.06)">'
-            f'<b>{icon} {title}</b><br>'
-            f'<span style="color:#818ba0;font-size:12px">{desc}</span></div>',
-            unsafe_allow_html=True,
-        )
-
+    st.markdown("### 🌸 Elite Flower")
+    st.caption("Asistente técnico")
+    st.markdown(
+        '<div style="padding:18px 0;color:#818ba0;line-height:1.7">'
+        'Selecciona un contexto en el menú lateral o escribe directamente tu consulta.'
+        '</div>',
+        unsafe_allow_html=True,
+    )
     st.markdown("</div>", unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
