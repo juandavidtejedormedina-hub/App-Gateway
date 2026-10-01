@@ -10,6 +10,8 @@ from google import genai
 from google.genai import types
 from pypdf import PdfReader
 
+from ajedrez import render_chess
+
 # ============================================================
 # CONFIGURACIÓN
 # ============================================================
@@ -72,6 +74,13 @@ div[data-testid="collapsedControl"] { display: none !important; }
 }
 .hero-sub { color: #929bb0; font-size: 15px; margin-top: 6px; }
 .neon { color: #ff4fc3; text-shadow: 0 0 12px rgba(255, 79, 195, .45); }
+.stButton > button {
+    background: #0b1018; color: #00ffd5;
+    border: 1px solid rgba(0,255,213,.35); border-radius: 10px;
+}
+.stButton > button:hover {
+    border-color: #00ffd5; color: #00ffd5; box-shadow: 0 0 15px rgba(0,255,213,.2);
+}
 div[data-testid="stChatMessage"] {
     background: rgba(10,14,22,.82);
     border: 1px solid rgba(255,255,255,.07);
@@ -280,6 +289,27 @@ st.markdown(
     "</div>",
     unsafe_allow_html=True,
 )
+
+# ============================================================
+# AJEDREZ (botón para abrir / volver)
+# ============================================================
+if "show_chess" not in st.session_state:
+    st.session_state.show_chess = False
+
+_, center, _ = st.columns([1, 2, 1])
+with center:
+    if st.session_state.show_chess:
+        if st.button("⬅️ Volver al asistente", use_container_width=True):
+            st.session_state.show_chess = False
+            st.rerun()
+    else:
+        if st.button("♟️ Jugar ajedrez", use_container_width=True):
+            st.session_state.show_chess = True
+            st.rerun()
+
+if st.session_state.show_chess:
+    render_chess()
+    st.stop()  # no mostrar el chat mientras se juega
 
 # ============================================================
 # CHAT
