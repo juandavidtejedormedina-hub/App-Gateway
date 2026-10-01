@@ -51,7 +51,8 @@ def get_secret(name, default=None):
 
 
 API_KEY = get_secret("GEMINI_API_KEY")
-MODEL = get_secret("GEMINI_MODEL", "gemini-2.5-flash")
+# CORRECCIÓN 1: Se actualiza el modelo por defecto a uno válido (gemini-2.0-flash)
+MODEL = get_secret("GEMINI_MODEL", "gemini-2.0-flash")
 
 # ============================================================
 # ESTILO — DARK / NEON
@@ -317,15 +318,16 @@ with left:
             else:
                 client = genai.Client(api_key=API_KEY)
                 history = st.session_state.messages[-MAX_HISTORY:]
+                
                 # El primer mensaje enviado debe ser del usuario
                 while history and history[0]["role"] != "user":
                     history = history[1:]
 
-                # Gemini usa los roles "user" y "model"
+                # CORRECCIÓN 2: Uso adecuado de from_text() para la estructura Part en la nueva SDK
                 contents = [
                     types.Content(
                         role="user" if m["role"] == "user" else "model",
-                        parts=[types.Part(text=m["content"])],
+                        parts=[types.Part.from_text(text=m["content"])],
                     )
                     for m in history
                 ]
@@ -351,8 +353,9 @@ with left:
                         answer = ("⏳ Se alcanzó el límite gratuito de Gemini (por minuto o por día). "
                                   "Espera un momento e intenta de nuevo.")
                     elif code == 404:
-                        answer = (f"⚠️ El modelo `{MODEL}` no está disponible. Cambia `GEMINI_MODEL` "
-                                  "en Secrets (por ejemplo `gemini-2.5-flash-lite`).")
+                        # CORRECCIÓN 3: Mensaje preciso de error 404 que no engaña diciendo que use "flash-lite"
+                        answer = (f"⚠️ Error 404: No se encontró el modelo `{MODEL}` o la API Key fue revocada "
+                                  f"por seguridad. Detalles: {e}")
                     elif code in (400, 401, 403):
                         answer = f"⚠️ Problema con la llave o la solicitud: {e}"
                     else:
@@ -373,6 +376,3 @@ with right:
     else:
         st.caption("Aún no has subido archivos. Usa la barra lateral.")
     st.markdown("</div>", unsafe_allow_html=True)
-
-st.markdown("---")
-st.caption(f"Elite Flower Assistant · {datetime.now().strftime('%Y-%m-%d %H:%M')}")
