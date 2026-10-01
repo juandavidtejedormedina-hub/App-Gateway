@@ -1,6 +1,5 @@
 import os
 import time
-from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -17,8 +16,8 @@ from pypdf import PdfReader
 st.set_page_config(
     page_title="Elite Flower Assistant",
     page_icon="🌸",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    layout="centered",
+    initial_sidebar_state="collapsed",
 )
 
 # Carpeta del repo donde van los documentos (junto a app.py)
@@ -49,7 +48,7 @@ MODELS_TO_TRY = [MODEL] + [m for m in FALLBACK_MODELS if m != MODEL]
 RETRIES_PER_MODEL = 3
 
 # ============================================================
-# ESTILO — DARK / NEON
+# ESTILO — DARK / NEON (sin barra lateral)
 # ============================================================
 st.markdown(
     """
@@ -61,33 +60,18 @@ st.markdown(
         #05070b;
     color: #eef2ff;
 }
-section[data-testid="stSidebar"] {
-    background: #080a11;
-    border-right: 1px solid rgba(255, 60, 190, .20);
-}
-.hero { padding: 24px 0 14px 0; }
+/* Oculta la barra lateral y su botón */
+section[data-testid="stSidebar"],
+div[data-testid="stSidebarCollapsedControl"],
+div[data-testid="collapsedControl"] { display: none !important; }
+
+.hero { padding: 24px 0 18px 0; text-align: center; }
 .hero-title {
-    font-size: 40px; font-weight: 850; color: #fff;
+    font-size: 38px; font-weight: 850; color: #fff;
     text-shadow: 0 0 12px rgba(255, 55, 190, .35); margin: 0;
 }
 .hero-sub { color: #929bb0; font-size: 15px; margin-top: 6px; }
 .neon { color: #ff4fc3; text-shadow: 0 0 12px rgba(255, 79, 195, .45); }
-.cyan { color: #00ffd5; text-shadow: 0 0 12px rgba(0, 255, 213, .35); }
-.info-card {
-    background: #0b0f17; border: 1px solid rgba(0,255,213,.18);
-    border-radius: 12px; padding: 15px;
-}
-.small-label {
-    color: #7f899e; font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px;
-}
-.big-value { color: #00ffd5; font-size: 25px; font-weight: 800; margin-top: 4px; }
-.stButton > button {
-    background: #0b1018; color: #00ffd5;
-    border: 1px solid rgba(0,255,213,.28); border-radius: 9px;
-}
-.stButton > button:hover {
-    border-color: #00ffd5; box-shadow: 0 0 15px rgba(0,255,213,.18);
-}
 div[data-testid="stChatMessage"] {
     background: rgba(10,14,22,.82);
     border: 1px solid rgba(255,255,255,.07);
@@ -178,9 +162,9 @@ def files_signature(files: list[Path]) -> tuple:
 
 
 @st.cache_data(show_spinner=False)
-def load_documents(signature: tuple) -> tuple[str, int, list[str]]:
-    """Devuelve (contexto, total_caracteres, nombres_incluidos)."""
-    blocks, names, total = [], [], 0
+def load_documents(signature: tuple) -> str:
+    """Devuelve el texto de todos los documentos, listo para dárselo al modelo."""
+    blocks, total = [], 0
     for path_str, _, _ in signature:
         path = Path(path_str)
         rel = path.relative_to(DOCS_DIR).as_posix()
@@ -189,21 +173,19 @@ def load_documents(signature: tuple) -> tuple[str, int, list[str]]:
             blocks.append(f"=== ARCHIVO: {rel} ===\n[Omitido: se alcanzó el límite total]")
             continue
         blocks.append(f"=== ARCHIVO: {rel} ===\n{text}")
-        names.append(rel)
         total += len(text)
-    return "\n\n".join(blocks), total, names
+    return "\n\n".join(blocks)
 
 
 # ============================================================
 # LLAMADA A GEMINI
 # ============================================================
-def ask_gemini(history: list[dict], area: str, docs_context: str) -> str:
+def ask_gemini(history: list[dict], docs_context: str) -> str:
     client = genai.Client(api_key=API_KEY)
 
     system = (
         "Eres el asistente de Elite Flower, una empresa floricultora. "
         "Responde siempre en español, de forma clara, precisa y concisa. "
-        f"El usuario consulta en el área: {area}. "
     )
     if docs_context:
         system += (
@@ -214,8 +196,8 @@ def ask_gemini(history: list[dict], area: str, docs_context: str) -> str:
         )
     else:
         system += (
-            "No hay documentos cargados en la base de conocimiento. Puedes responder "
-            "con conocimiento general e indicar que no tienes documentos de la empresa."
+            "No tienes documentos de la empresa disponibles. Puedes responder con "
+            "conocimiento general, aclarando que no cuentas con información interna."
         )
 
     # Gemini espera que la conversación empiece con un mensaje del usuario.
@@ -260,34 +242,22 @@ def ask_gemini(history: list[dict], area: str, docs_context: str) -> str:
 
 def friendly_error(e: Exception) -> str:
     msg = str(e)
+    if "503" in msg or "UNAVAILABLE" in msg:
+        return "⚠️ El servicio está saturado en este momento. Espera un minuto y vuelve a preguntar."
+    if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+        return "⚠️ Se alcanzó el límite de uso. Espera un momento e intenta de nuevo."
     if "404" in msg or "NOT_FOUND" in msg:
-        hint = (
-            "Ninguno de los modelos configurados está disponible para tu cuenta. "
-            "Agrega en Secrets `GEMINI_MODEL = \"gemini-3.5-flash\"` (o el modelo que "
-            "recomiende el detalle técnico de abajo) y reinicia la app."
-        )
-    elif "503" in msg or "UNAVAILABLE" in msg:
-        hint = (
-            "Los modelos de Google están saturados en este momento (ya reintenté con "
-            "varios modelos). Espera uno o dos minutos y vuelve a preguntar."
-        )
-    elif "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-        hint = "Se alcanzó el límite de uso de la API. Espera un momento e intenta de nuevo."
-    elif "403" in msg or "PERMISSION_DENIED" in msg or "API key" in msg or "400" in msg:
-        hint = "La API Key es inválida, fue revocada o no tiene permisos. Genera una nueva en Google AI Studio."
-    else:
-        hint = "Ocurrió un error inesperado."
-    return f"⚠️ {hint}\n\n<details><summary>Detalle técnico</summary>\n\n`{msg}`\n\n</details>"
+        return "⚠️ El modelo de IA configurado no está disponible. Avisa al administrador."
+    if "403" in msg or "PERMISSION_DENIED" in msg or "API key" in msg or "400" in msg:
+        return "⚠️ Hay un problema con la clave de la IA. Avisa al administrador."
+    return "⚠️ Ocurrió un error inesperado. Intenta de nuevo en unos momentos."
 
 
 # ============================================================
-# CARGA DE DOCUMENTOS
+# CARGA SILENCIOSA DE DOCUMENTOS
 # ============================================================
 doc_files = list_document_files()
-docs_context, docs_chars, docs_names = ("", 0, [])
-if doc_files:
-    with st.spinner("Leyendo documentos..."):
-        docs_context, docs_chars, docs_names = load_documents(files_signature(doc_files))
+docs_context = load_documents(files_signature(doc_files)) if doc_files else ""
 
 # ============================================================
 # ESTADO
@@ -296,75 +266,9 @@ if "messages" not in st.session_state:
     st.session_state.messages = [
         {
             "role": "assistant",
-            "content": (
-                "Hola. Soy el **asistente de Elite Flower**. 🌸\n\n"
-                "Ya tengo cargados los documentos de la empresa. "
-                "Pregúntame lo que necesites sobre ellos."
-            ),
+            "content": "Hola. Soy el **asistente de Elite Flower**. 🌸\n\n¿En qué te puedo ayudar?",
         }
     ]
-
-# ============================================================
-# SIDEBAR
-# ============================================================
-with st.sidebar:
-    st.markdown("## 🌸 **ELITE FLOWER**")
-    st.caption("Asistente inteligente")
-    st.markdown("---")
-
-    st.markdown("### 📚 Base de conocimiento")
-    if docs_names:
-        st.markdown(
-            f'<span class="cyan">● {len(docs_names)} documento(s) cargado(s)</span>',
-            unsafe_allow_html=True,
-        )
-        with st.expander("Ver documentos"):
-            for n in docs_names:
-                st.caption(f"• {n}")
-    else:
-        st.warning("No hay documentos en la carpeta `documentos/` del repositorio.")
-
-    if st.button("🔄 Recargar documentos", use_container_width=True):
-        st.cache_data.clear()
-        st.rerun()
-
-    st.markdown("### Áreas")
-    area = st.selectbox(
-        "Contexto de consulta",
-        [
-            "General",
-            "Invernaderos",
-            "Sensores e IoT",
-            "Reservorios",
-            "Mantenimiento",
-            "Automatización",
-            "Energía",
-            "Datos y reportes",
-        ],
-        label_visibility="collapsed",
-    )
-
-    st.markdown("---")
-    st.markdown("### Accesos rápidos")
-    quick = [
-        "Hazme un resumen de los documentos",
-        "¿Cuáles son los puntos clave?",
-        "Lista los datos o cifras más importantes",
-    ]
-    for q in quick:
-        if st.button(q, use_container_width=True):
-            st.session_state.pending_prompt = q
-
-    st.markdown("---")
-    if st.button("🗑️ Limpiar conversación", use_container_width=True):
-        st.session_state.messages = st.session_state.messages[:1]
-        st.rerun()
-
-    st.markdown("---")
-    if API_KEY:
-        st.markdown('<span class="cyan">● IA CONECTADA</span>', unsafe_allow_html=True)
-    else:
-        st.markdown('<span class="neon">● SIN API KEY</span>', unsafe_allow_html=True)
 
 # ============================================================
 # CABECERA
@@ -372,39 +276,19 @@ with st.sidebar:
 st.markdown(
     '<div class="hero">'
     '<div class="hero-title">ELITE FLOWER <span class="neon">AI ASSISTANT</span></div>'
-    '<div class="hero-sub">Consulta y analiza los documentos de la empresa con inteligencia artificial</div>'
+    '<div class="hero-sub">Pregúntame lo que necesites</div>'
     "</div>",
     unsafe_allow_html=True,
 )
-
-cards = [
-    ("DOCUMENTOS", str(len(docs_names)), "Archivos en el repositorio"),
-    ("CONTENIDO", f"{docs_chars:,}".replace(",", "."), "Caracteres leídos"),
-    ("ÁREA", area, "Contexto activo"),
-    ("MODELO", str(MODEL), "Gemini"),
-]
-cols = st.columns(4)
-for col, (label, value, note) in zip(cols, cards):
-    with col:
-        st.markdown(
-            f'<div class="info-card"><div class="small-label">{label}</div>'
-            f'<div class="big-value" style="font-size:{"25px" if len(value) < 14 else "17px"}">{value}</div>'
-            f'<div style="color:#778197;font-size:11px;margin-top:4px">{note}</div></div>',
-            unsafe_allow_html=True,
-        )
-
-st.markdown("<br>", unsafe_allow_html=True)
 
 # ============================================================
 # CHAT
 # ============================================================
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        st.markdown(message["content"], unsafe_allow_html=True)
+        st.markdown(message["content"])
 
-prompt = st.chat_input("Escribe una consulta sobre Elite Flower...")
-if not prompt:
-    prompt = st.session_state.pop("pending_prompt", None)
+prompt = st.chat_input("Escribe tu pregunta...")
 
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -413,21 +297,14 @@ if prompt:
 
     with st.chat_message("assistant"):
         if not API_KEY:
-            answer = (
-                "⚠️ No encontré la `GEMINI_API_KEY`. Agrégala en **Settings → Secrets** "
-                'de Streamlit Cloud:\n\n```toml\nGEMINI_API_KEY = "tu_llave"\n```'
-            )
+            answer = "⚠️ El asistente no está configurado todavía. Avisa al administrador."
             st.markdown(answer)
         else:
             with st.spinner("Pensando..."):
                 try:
-                    answer = ask_gemini(st.session_state.messages, area, docs_context)
-                    st.markdown(answer)
+                    answer = ask_gemini(st.session_state.messages, docs_context)
                 except Exception as e:
                     answer = friendly_error(e)
-                    st.markdown(answer, unsafe_allow_html=True)
+            st.markdown(answer)
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
-
-st.markdown("---")
-st.caption(f"Elite Flower Assistant · {datetime.now().strftime('%Y-%m-%d %H:%M')}")
