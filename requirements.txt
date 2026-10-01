@@ -1,1 +1,6 @@
-streamlit
+streamlit>=1.40
+anthropic>=0.40
+pandas
+openpyxl
+pypdf
+python-docx
