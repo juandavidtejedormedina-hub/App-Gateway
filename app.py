@@ -1,4 +1,5 @@
 import os
+import time
 from datetime import datetime
 from io import BytesIO
 
@@ -38,6 +39,11 @@ def get_secret(name: str, default=None):
 
 API_KEY = get_secret("GEMINI_API_KEY")
 MODEL = get_secret("GEMINI_MODEL", DEFAULT_MODEL)
+
+# Si el modelo principal está saturado (503) o no existe (404), se prueban estos en orden.
+FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+MODELS_TO_TRY = [MODEL] + [m for m in FALLBACK_MODELS if m != MODEL]
+RETRIES_PER_MODEL = 3
 
 # ============================================================
 # ESTILO — DARK / NEON
@@ -199,15 +205,31 @@ def ask_gemini(history: list[dict], area: str, docs_context: str) -> str:
         for m in msgs
     ]
 
-    response = client.models.generate_content(
-        model=MODEL,
-        contents=contents,
-        config=types.GenerateContentConfig(
-            system_instruction=system,
-            temperature=0.3,
-        ),
-    )
-    return response.text or "No obtuve respuesta del modelo. Intenta reformular la pregunta."
+    config = types.GenerateContentConfig(system_instruction=system, temperature=0.3)
+
+    last_error = None
+    for model_name in MODELS_TO_TRY:
+        for attempt in range(RETRIES_PER_MODEL):
+            try:
+                response = client.models.generate_content(
+                    model=model_name, contents=contents, config=config
+                )
+                st.session_state.last_model_used = model_name
+                return response.text or "No obtuve respuesta del modelo. Intenta reformular la pregunta."
+            except Exception as e:
+                last_error = e
+                msg = str(e)
+                if "503" in msg or "UNAVAILABLE" in msg or "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                    # Saturado: espera un poco y reintenta (2s, 4s, 6s)
+                    if attempt < RETRIES_PER_MODEL - 1:
+                        time.sleep(2 * (attempt + 1))
+                        continue
+                    break  # agotó reintentos: pasa al siguiente modelo
+                if "404" in msg or "NOT_FOUND" in msg:
+                    break  # el modelo no existe: pasa al siguiente
+                raise  # otro error (llave inválida, etc.): no tiene sentido reintentar
+
+    raise last_error
 
 
 def friendly_error(e: Exception) -> str:
@@ -219,6 +241,11 @@ def friendly_error(e: Exception) -> str:
         )
     elif "403" in msg or "PERMISSION_DENIED" in msg or "API key" in msg or "400" in msg:
         hint = "La API Key es inválida, fue revocada o no tiene permisos. Genera una nueva en Google AI Studio."
+    elif "503" in msg or "UNAVAILABLE" in msg:
+        hint = (
+            "Los modelos de Google están saturados en este momento (ya reintenté con "
+            "varios modelos). Espera uno o dos minutos y vuelve a preguntar."
+        )
     elif "429" in msg or "RESOURCE_EXHAUSTED" in msg:
         hint = "Se alcanzó el límite de uso de la API. Espera un momento e intenta de nuevo."
     else:
