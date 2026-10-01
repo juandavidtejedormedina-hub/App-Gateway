@@ -2,6 +2,7 @@ import os
 import time
 from datetime import datetime
 from io import BytesIO
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -20,11 +21,13 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# Alias que siempre apunta al Flash vigente (evita errores 404 por modelos retirados).
-# Puedes cambiarlo desde Secrets con GEMINI_MODEL = "gemini-2.5-flash", por ejemplo.
+# Carpeta del repo donde van los documentos (junto a app.py)
+DOCS_DIR = Path(__file__).parent / "documentos"
+SUPPORTED_EXT = {".pdf", ".docx", ".xlsx", ".xls", ".csv", ".txt"}
+
 DEFAULT_MODEL = "gemini-flash-latest"
 MAX_CHARS_PER_FILE = 120_000
-MAX_CHARS_TOTAL = 400_000
+MAX_CHARS_TOTAL = 600_000
 
 
 def get_secret(name: str, default=None):
@@ -41,7 +44,7 @@ API_KEY = get_secret("GEMINI_API_KEY")
 MODEL = get_secret("GEMINI_MODEL", DEFAULT_MODEL)
 
 # Si el modelo principal está saturado (503) o no existe (404), se prueban estos en orden.
-FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+FALLBACK_MODELS = ["gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-2.5-flash"]
 MODELS_TO_TRY = [MODEL] + [m for m in FALLBACK_MODELS if m != MODEL]
 RETRIES_PER_MODEL = 3
 
@@ -97,7 +100,7 @@ div[data-testid="stChatMessage"] {
 
 
 # ============================================================
-# LECTURA DE DOCUMENTOS
+# LECTURA DE DOCUMENTOS (desde la carpeta del repo)
 # ============================================================
 def _decode_text(data: bytes) -> str:
     for enc in ("utf-8", "latin-1"):
@@ -108,19 +111,19 @@ def _decode_text(data: bytes) -> str:
     return data.decode("utf-8", errors="ignore")
 
 
-@st.cache_data(show_spinner=False)
-def extract_text(name: str, data: bytes) -> str:
+def extract_text(path: Path) -> str:
     """Extrae texto de PDF, Word, Excel, CSV o TXT."""
-    ext = name.lower().rsplit(".", 1)[-1] if "." in name else ""
+    ext = path.suffix.lower()
+    data = path.read_bytes()
     try:
-        if ext == "pdf":
+        if ext == ".pdf":
             reader = PdfReader(BytesIO(data))
             pages = []
             for i, page in enumerate(reader.pages, start=1):
                 pages.append(f"[Página {i}]\n{page.extract_text() or ''}")
             text = "\n\n".join(pages)
 
-        elif ext == "docx":
+        elif ext == ".docx":
             doc = Document(BytesIO(data))
             parts = [p.text for p in doc.paragraphs if p.text.strip()]
             for t_idx, table in enumerate(doc.tables, start=1):
@@ -129,7 +132,7 @@ def extract_text(name: str, data: bytes) -> str:
                     parts.append(" | ".join(cell.text.strip() for cell in row.cells))
             text = "\n".join(parts)
 
-        elif ext in ("xlsx", "xls"):
+        elif ext in (".xlsx", ".xls"):
             sheets = pd.read_excel(BytesIO(data), sheet_name=None)
             parts = []
             for sheet_name, df in sheets.items():
@@ -137,15 +140,15 @@ def extract_text(name: str, data: bytes) -> str:
                 parts.append(df.to_csv(index=False))
             text = "\n".join(parts)
 
-        elif ext == "csv":
+        elif ext == ".csv":
             df = pd.read_csv(BytesIO(data), sep=None, engine="python")
             text = f"({len(df)} filas)\n" + df.to_csv(index=False)
 
-        elif ext == "txt":
+        elif ext == ".txt":
             text = _decode_text(data)
 
         else:
-            return f"[Formato .{ext} no soportado]"
+            return f"[Formato {ext} no soportado]"
     except Exception as e:
         return f"[No se pudo leer el archivo: {e}]"
 
@@ -154,17 +157,41 @@ def extract_text(name: str, data: bytes) -> str:
     return text
 
 
-def build_documents_context(files) -> tuple[str, int]:
-    """Une el texto de todos los archivos. Devuelve (contexto, total_caracteres)."""
-    blocks, total = [], 0
-    for f in files:
-        text = extract_text(f.name, f.getvalue())
-        if total + len(text) > MAX_CHARS_TOTAL:
-            blocks.append(f"=== ARCHIVO: {f.name} ===\n[Omitido: se alcanzó el límite total]")
+def list_document_files() -> list[Path]:
+    """Lista los archivos soportados dentro de documentos/ (incluye subcarpetas)."""
+    if not DOCS_DIR.exists():
+        return []
+    files = []
+    for p in sorted(DOCS_DIR.rglob("*")):
+        if not p.is_file():
             continue
-        blocks.append(f"=== ARCHIVO: {f.name} ===\n{text}")
+        if p.name.startswith((".", "~$")):  # ocultos y temporales de Word
+            continue
+        if p.suffix.lower() in SUPPORTED_EXT:
+            files.append(p)
+    return files
+
+
+def files_signature(files: list[Path]) -> tuple:
+    """Huella de los archivos: si cambia alguno, se vuelve a leer todo."""
+    return tuple((str(p), p.stat().st_mtime, p.stat().st_size) for p in files)
+
+
+@st.cache_data(show_spinner=False)
+def load_documents(signature: tuple) -> tuple[str, int, list[str]]:
+    """Devuelve (contexto, total_caracteres, nombres_incluidos)."""
+    blocks, names, total = [], [], 0
+    for path_str, _, _ in signature:
+        path = Path(path_str)
+        rel = path.relative_to(DOCS_DIR).as_posix()
+        text = extract_text(path)
+        if total + len(text) > MAX_CHARS_TOTAL:
+            blocks.append(f"=== ARCHIVO: {rel} ===\n[Omitido: se alcanzó el límite total]")
+            continue
+        blocks.append(f"=== ARCHIVO: {rel} ===\n{text}")
+        names.append(rel)
         total += len(text)
-    return "\n\n".join(blocks), total
+    return "\n\n".join(blocks), total, names
 
 
 # ============================================================
@@ -180,16 +207,15 @@ def ask_gemini(history: list[dict], area: str, docs_context: str) -> str:
     )
     if docs_context:
         system += (
-            "Responde basándote en los documentos que el usuario subió, que aparecen "
-            "abajo. Si la respuesta no está en ellos, dilo claramente en lugar de "
-            "inventar. Cuando sea útil, menciona de qué archivo sacaste la información.\n\n"
+            "Responde basándote en los documentos de la empresa que aparecen abajo. "
+            "Si la respuesta no está en ellos, dilo claramente en lugar de inventar. "
+            "Cuando sea útil, menciona de qué archivo sacaste la información.\n\n"
             "DOCUMENTOS:\n" + docs_context
         )
     else:
         system += (
-            "El usuario aún no ha subido documentos. Puedes responder con conocimiento "
-            "general y sugerirle subir archivos en la barra lateral para respuestas "
-            "basadas en su información."
+            "No hay documentos cargados en la base de conocimiento. Puedes responder "
+            "con conocimiento general e indicar que no tienes documentos de la empresa."
         )
 
     # Gemini espera que la conversación empiece con un mensaje del usuario.
@@ -208,39 +234,38 @@ def ask_gemini(history: list[dict], area: str, docs_context: str) -> str:
     config = types.GenerateContentConfig(system_instruction=system, temperature=0.3)
 
     last_error = None
+    overload_error = None
     for model_name in MODELS_TO_TRY:
         for attempt in range(RETRIES_PER_MODEL):
             try:
                 response = client.models.generate_content(
                     model=model_name, contents=contents, config=config
                 )
-                st.session_state.last_model_used = model_name
                 return response.text or "No obtuve respuesta del modelo. Intenta reformular la pregunta."
             except Exception as e:
                 last_error = e
                 msg = str(e)
                 if "503" in msg or "UNAVAILABLE" in msg or "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                    # Saturado: espera un poco y reintenta (2s, 4s, 6s)
+                    overload_error = e
                     if attempt < RETRIES_PER_MODEL - 1:
                         time.sleep(2 * (attempt + 1))
                         continue
                     break  # agotó reintentos: pasa al siguiente modelo
                 if "404" in msg or "NOT_FOUND" in msg:
                     break  # el modelo no existe: pasa al siguiente
-                raise  # otro error (llave inválida, etc.): no tiene sentido reintentar
+                raise  # otro error (llave inválida, etc.)
 
-    raise last_error
+    raise (overload_error or last_error)
 
 
 def friendly_error(e: Exception) -> str:
     msg = str(e)
     if "404" in msg or "NOT_FOUND" in msg:
         hint = (
-            f"El modelo `{MODEL}` no está disponible. Cambia `GEMINI_MODEL` en Secrets "
-            "(por ejemplo `gemini-flash-latest` o `gemini-2.5-flash`)."
+            "Ninguno de los modelos configurados está disponible para tu cuenta. "
+            "Agrega en Secrets `GEMINI_MODEL = \"gemini-3.5-flash\"` (o el modelo que "
+            "recomiende el detalle técnico de abajo) y reinicia la app."
         )
-    elif "403" in msg or "PERMISSION_DENIED" in msg or "API key" in msg or "400" in msg:
-        hint = "La API Key es inválida, fue revocada o no tiene permisos. Genera una nueva en Google AI Studio."
     elif "503" in msg or "UNAVAILABLE" in msg:
         hint = (
             "Los modelos de Google están saturados en este momento (ya reintenté con "
@@ -248,10 +273,21 @@ def friendly_error(e: Exception) -> str:
         )
     elif "429" in msg or "RESOURCE_EXHAUSTED" in msg:
         hint = "Se alcanzó el límite de uso de la API. Espera un momento e intenta de nuevo."
+    elif "403" in msg or "PERMISSION_DENIED" in msg or "API key" in msg or "400" in msg:
+        hint = "La API Key es inválida, fue revocada o no tiene permisos. Genera una nueva en Google AI Studio."
     else:
         hint = "Ocurrió un error inesperado."
     return f"⚠️ {hint}\n\n<details><summary>Detalle técnico</summary>\n\n`{msg}`\n\n</details>"
 
+
+# ============================================================
+# CARGA DE DOCUMENTOS
+# ============================================================
+doc_files = list_document_files()
+docs_context, docs_chars, docs_names = ("", 0, [])
+if doc_files:
+    with st.spinner("Leyendo documentos..."):
+        docs_context, docs_chars, docs_names = load_documents(files_signature(doc_files))
 
 # ============================================================
 # ESTADO
@@ -262,8 +298,8 @@ if "messages" not in st.session_state:
             "role": "assistant",
             "content": (
                 "Hola. Soy el **asistente de Elite Flower**. 🌸\n\n"
-                "Sube tus archivos (PDF, Word, Excel, CSV, TXT) en la barra lateral "
-                "y pregúntame lo que necesites sobre ellos."
+                "Ya tengo cargados los documentos de la empresa. "
+                "Pregúntame lo que necesites sobre ellos."
             ),
         }
     ]
@@ -276,13 +312,21 @@ with st.sidebar:
     st.caption("Asistente inteligente")
     st.markdown("---")
 
-    st.markdown("### 📎 Documentos")
-    uploaded_files = st.file_uploader(
-        "Sube tus archivos",
-        type=["pdf", "docx", "xlsx", "xls", "csv", "txt"],
-        accept_multiple_files=True,
-        label_visibility="collapsed",
-    )
+    st.markdown("### 📚 Base de conocimiento")
+    if docs_names:
+        st.markdown(
+            f'<span class="cyan">● {len(docs_names)} documento(s) cargado(s)</span>',
+            unsafe_allow_html=True,
+        )
+        with st.expander("Ver documentos"):
+            for n in docs_names:
+                st.caption(f"• {n}")
+    else:
+        st.warning("No hay documentos en la carpeta `documentos/` del repositorio.")
+
+    if st.button("🔄 Recargar documentos", use_container_width=True):
+        st.cache_data.clear()
+        st.rerun()
 
     st.markdown("### Áreas")
     area = st.selectbox(
@@ -323,26 +367,18 @@ with st.sidebar:
         st.markdown('<span class="neon">● SIN API KEY</span>', unsafe_allow_html=True)
 
 # ============================================================
-# PROCESAR DOCUMENTOS
-# ============================================================
-docs_context, docs_chars = ("", 0)
-if uploaded_files:
-    with st.spinner("Leyendo documentos..."):
-        docs_context, docs_chars = build_documents_context(uploaded_files)
-
-# ============================================================
 # CABECERA
 # ============================================================
 st.markdown(
     '<div class="hero">'
     '<div class="hero-title">ELITE FLOWER <span class="neon">AI ASSISTANT</span></div>'
-    '<div class="hero-sub">Consulta y analiza tus documentos con inteligencia artificial</div>'
+    '<div class="hero-sub">Consulta y analiza los documentos de la empresa con inteligencia artificial</div>'
     "</div>",
     unsafe_allow_html=True,
 )
 
 cards = [
-    ("DOCUMENTOS", str(len(uploaded_files or [])), "Archivos cargados"),
+    ("DOCUMENTOS", str(len(docs_names)), "Archivos en el repositorio"),
     ("CONTENIDO", f"{docs_chars:,}".replace(",", "."), "Caracteres leídos"),
     ("ÁREA", area, "Contexto activo"),
     ("MODELO", str(MODEL), "Gemini"),
