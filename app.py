@@ -4,7 +4,9 @@ from datetime import datetime
 
 import pandas as pd
 import streamlit as st
-from anthropic import Anthropic, APIError
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types
 
 # ============================================================
 # CONFIGURACIÓN
@@ -48,8 +50,8 @@ def get_secret(name, default=None):
         return os.environ.get(name, default)
 
 
-API_KEY = get_secret("ANTHROPIC_API_KEY")
-MODEL = get_secret("ANTHROPIC_MODEL", "claude-sonnet-5-5")
+API_KEY = get_secret("GEMINI_API_KEY")
+MODEL = get_secret("GEMINI_MODEL", "gemini-2.5-flash")
 
 # ============================================================
 # ESTILO — DARK / NEON
@@ -308,31 +310,56 @@ with left:
         with st.chat_message("assistant"):
             if not API_KEY:
                 answer = (
-                    "⚠️ Falta la clave `ANTHROPIC_API_KEY`. Agrégala en los *Secrets* "
+                    "⚠️ Falta la clave `GEMINI_API_KEY`. Agrégala en los *Secrets* "
                     "de Streamlit para activar el asistente."
                 )
                 st.markdown(answer)
             else:
-                client = Anthropic(api_key=API_KEY)
+                client = genai.Client(api_key=API_KEY)
                 history = st.session_state.messages[-MAX_HISTORY:]
-                # La API exige que el primer mensaje sea del usuario
+                # El primer mensaje enviado debe ser del usuario
                 while history and history[0]["role"] != "user":
                     history = history[1:]
 
+                # Gemini usa los roles "user" y "model"
+                contents = [
+                    types.Content(
+                        role="user" if m["role"] == "user" else "model",
+                        parts=[types.Part(text=m["content"])],
+                    )
+                    for m in history
+                ]
+
                 def stream_answer():
-                    with client.messages.stream(
+                    stream = client.models.generate_content_stream(
                         model=MODEL,
-                        max_tokens=2000,
-                        system=build_system_prompt(docs, area),
-                        messages=[{"role": m["role"], "content": m["content"]} for m in history],
-                    ) as stream:
-                        for text in stream.text_stream:
-                            yield text
+                        contents=contents,
+                        config=types.GenerateContentConfig(
+                            system_instruction=build_system_prompt(docs, area),
+                            max_output_tokens=2000,
+                        ),
+                    )
+                    for chunk in stream:
+                        if chunk.text:
+                            yield chunk.text
 
                 try:
                     answer = st.write_stream(stream_answer())
-                except APIError as e:
-                    answer = f"⚠️ Error al consultar el modelo: {e}"
+                except genai_errors.APIError as e:
+                    code = getattr(e, "code", None)
+                    if code == 429:
+                        answer = ("⏳ Se alcanzó el límite gratuito de Gemini (por minuto o por día). "
+                                  "Espera un momento e intenta de nuevo.")
+                    elif code == 404:
+                        answer = (f"⚠️ El modelo `{MODEL}` no está disponible. Cambia `GEMINI_MODEL` "
+                                  "en Secrets (por ejemplo `gemini-2.5-flash-lite`).")
+                    elif code in (400, 401, 403):
+                        answer = f"⚠️ Problema con la llave o la solicitud: {e}"
+                    else:
+                        answer = f"⚠️ Error al consultar el modelo: {e}"
+                    st.markdown(answer)
+                except Exception as e:
+                    answer = f"⚠️ Error inesperado: {e}"
                     st.markdown(answer)
 
         st.session_state.messages.append({"role": "assistant", "content": answer})
