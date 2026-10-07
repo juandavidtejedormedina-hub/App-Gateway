@@ -10,7 +10,7 @@ from html import escape
 import pandas as pd
 import streamlit as st
 
-from gateway_data import REGIONS, counts, demo_features, feature_collection, load_private_kmz
+from gateway_data import REGIONS, counts, feature_collection, load_private_kmz
 from gateway_map_component import gateway_map
 from gateway_roster import ZONE_COLORS, load_roster, reconcile_features
 
@@ -96,12 +96,12 @@ def _source_data() -> tuple[list[dict], list[dict], bool, str | None]:
     xlsx_setting = os.getenv("GATEWAYS_XLSX_PATH", "").strip()
     if not kmz_setting:
         warning = "Falta configurar GATEWAYS_KMZ_PATH." if xlsx_setting else None
-        return demo_features(), [], False, warning
+        return [], [], False, warning
     try:
         kmz_path = Path(kmz_setting).expanduser().resolve(strict=True)
         features = _private_features(str(kmz_path), kmz_path.stat().st_mtime)
     except (FileNotFoundError, OSError, ValueError):
-        return demo_features(), [], False, "No se pudo leer el KMZ local."
+        return [], [], False, "No se pudo leer el KMZ local."
     if not xlsx_setting:
         return features, [], True, "No se configuró GATEWAYS_XLSX_PATH; se muestran solo los puntos del KMZ."
     try:
@@ -182,16 +182,21 @@ def render_gateways() -> None:
         st.session_state.gateway_drawings = []
 
     badge_class = "" if is_private else " demo"
-    badge = "KMZ y Excel locales" if roster else "KMZ local privado" if is_private else "Datos ficticios"
-    headline = ("Tus zonas. <span>Tus fincas y gateways.</span>" if roster
-                else "Explora la red. <span>Planea la cobertura.</span>")
-    description = (
-        "Fincas del listado, gateways y trazos de Google Earth organizados por zona. "
-        "Filtra, inspecciona puntos y dibuja nuevas rutas."
-        if roster else
-        "Fincas, gateways, recorridos y pruebas reunidos en un mapa dinámico. "
-        "Filtra por región, inspecciona puntos y dibuja nuevas rutas."
-    )
+    if roster:
+        badge = "KMZ y Excel locales"
+        headline = "Tus zonas. <span>Tus fincas y gateways.</span>"
+        description = ("Fincas del listado, gateways y trazos de Google Earth organizados por zona. "
+                       "Filtra, inspecciona puntos y dibuja nuevas rutas.")
+    elif is_private:
+        badge = "KMZ local privado"
+        headline = "Explora la red. <span>Planea la cobertura.</span>"
+        description = ("Fincas, gateways, recorridos y pruebas reunidos en un mapa dinámico. "
+                       "Filtra por región, inspecciona puntos y dibuja nuevas rutas.")
+    else:
+        badge = "Sin datos cargados"
+        headline = "Mapa privado. <span>Sin puntos de muestra.</span>"
+        description = ("Esta página pública no carga ubicaciones de la empresa. Abre el proyecto "
+                       "en el entorno privado para ver el KMZ y el Excel reales.")
     st.markdown(
         '<div class="gw-heading"><div class="gw-eyebrow">Centro de operaciones · LoRaWAN</div>'
         f'<h1>{headline}</h1>'
@@ -202,6 +207,11 @@ def render_gateways() -> None:
     )
     if source_error:
         st.warning(source_error)
+    if not is_private:
+        st.info("No hay fincas, gateways ni mediciones en esta vista pública. "
+                "Se retiraron los puntos ficticios para no confundirlos con datos de campo. "
+                "Los archivos reales solo se leen en una ejecución privada autorizada.")
+        return
 
     available_regions = {str(item["properties"].get("region") or "Sin región") for item in source}
     available_regions.update(item["zone"] for item in roster)
@@ -303,7 +313,7 @@ def render_gateways() -> None:
 
     st.caption(
         "Los datos reales solo se leen en un entorno privado desde GATEWAYS_KMZ_PATH y "
-        "GATEWAYS_XLSX_PATH. La vista pública usa ubicaciones ficticias. "
+        "GATEWAYS_XLSX_PATH. La vista pública no muestra ubicaciones. "
         "El mapa web requiere internet; la captura offline continúa en QField."
     )
 

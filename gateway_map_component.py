@@ -168,6 +168,7 @@ function setMode(instance, mode) {
 }
 
 function drawMarkers(instance) {
+  if (instance.popup) {instance.popup.remove();instance.popup = null;}
   instance.markers.forEach(marker => marker.remove());
   instance.markers = [];
   for (const feature of instance.features) {
@@ -186,9 +187,9 @@ function drawMarkers(instance) {
       .setLngLat(geometry.coordinates).addTo(instance.map);
     el.addEventListener('click',event => {
       event.stopPropagation();
-      new instance.lib.Popup({offset:22}).setLngLat(geometry.coordinates)
+      if (instance.popup) instance.popup.remove();
+      instance.popup = new instance.lib.Popup({offset:22}).setLngLat(geometry.coordinates)
         .setDOMContent(popupNode(feature)).addTo(instance.map);
-      instance.setTriggerValue('selected_name', String(props.name || 'Punto'));
     });
     instance.markers.push(marker);
   }
@@ -222,7 +223,7 @@ export default function(component) {
     return;
   }
   instance = {root, data, loaded:false, mode:'explore', draft:[], markers:[],
-    features:[], fitKey:null, hint:root.querySelector('.gw-map-hint'),
+    features:[], popup:null, fitKey:null, hint:root.querySelector('.gw-map-hint'),
     setTriggerValue, disposed:false};
   mapInstances.set(root,instance);
   getLibrary().then(lib => {
@@ -277,6 +278,7 @@ export default function(component) {
   });
   return () => {
     instance.disposed = true;
+    if (instance.popup) instance.popup.remove();
     instance.markers.forEach(marker => marker.remove());
     if (instance.map) instance.map.remove();
     mapInstances.delete(root);
@@ -302,5 +304,4 @@ def gateway_map(*, features: list[dict], layers: dict[str, bool], basemap: str,
         height=650,
         width="stretch",
         on_drawn_feature_change=lambda: None,
-        on_selected_name_change=lambda: None,
     )
