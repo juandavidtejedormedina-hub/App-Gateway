@@ -45,13 +45,13 @@ MAP_CSS = """
 .gw-map-error[hidden] { display:none; }
 .gw-pin { position:relative; display:grid; place-items:center; border:2px solid #091822;
   color:#071720; cursor:pointer; font:800 11px system-ui; line-height:1;
-  box-shadow:0 3px 15px rgba(0,0,0,.4); transition:transform .16s ease; }
-.gw-pin:hover { transform:scale(1.18); z-index:4; }
-.gw-pin.gateway { width:27px; height:27px; background:#ff6ac6; border-radius:9px 9px 9px 2px;
-  transform:rotate(-45deg); }
-.gw-pin.gateway::after { content:'⌁'; transform:rotate(45deg); font-size:17px; }
-.gw-pin.gateway:hover { transform:rotate(-45deg) scale(1.18); }
-.gw-pin.finca { width:17px; height:17px; border-radius:50%; background:#ffd66d; }
+  box-shadow:0 3px 15px rgba(0,0,0,.4); transition:filter .16s ease; }
+.gw-pin:hover { filter:brightness(1.23); z-index:4; }
+.gw-pin.gateway { width:27px; height:27px; background:var(--zone-color,#ff6ac6);
+  border-radius:7px; color:#071720; font-size:13px; }
+.gw-pin.finca { width:17px; height:17px; border-radius:50%; background:var(--zone-color,#ffd66d); }
+.gw-pin.referencia_punto { width:14px; height:14px; border-radius:50%;
+  border:2px solid var(--zone-color,#a8b8c5); background:#142431; }
 .gw-pin.medicion { width:25px; height:25px; border-radius:50%; background:#9daab4; }
 .gw-pin.medicion.confirmado { background:#5ee2a5; }
 .gw-pin.medicion.no_recibido { background:#ff7484; }
@@ -103,6 +103,7 @@ function visible(feature, layers) {
   const kind = feature?.properties?.kind;
   return kind === 'gateway' ? layers.gateways
     : kind === 'finca' ? layers.fincas
+    : kind === 'referencia_punto' ? layers.referencias
     : kind === 'medicion' ? layers.mediciones
     : kind === 'recorrido' || kind === 'referencia' ? layers.recorridos : true;
 }
@@ -115,7 +116,9 @@ function popupNode(feature) {
   const sub = document.createElement('div');
   sub.className = 'gw-popup-sub';
   const status = feature.properties?.status;
-  sub.textContent = [feature.properties?.region, status ? status.replaceAll('_',' ') : ''].filter(Boolean).join(' · ');
+  sub.textContent = [feature.properties?.region,
+    feature.properties?.roster_name ? `Excel: ${feature.properties.roster_name}` : '',
+    status ? status.replaceAll('_',' ') : ''].filter(Boolean).join(' · ');
   box.append(title, sub);
   return box;
 }
@@ -174,7 +177,9 @@ function drawMarkers(instance) {
     const el = document.createElement('button');
     el.type = 'button';
     el.className = ['gw-pin',props.kind,props.status].filter(Boolean).join(' ');
-    el.textContent = props.kind === 'medicion' ? String(props.number || '') : '';
+    if (props.zone_color) el.style.setProperty('--zone-color', String(props.zone_color));
+    el.textContent = props.kind === 'gateway' ? 'G'
+      : props.kind === 'medicion' ? String(props.number || '') : '';
     el.title = String(props.name || 'Punto');
     el.setAttribute('aria-label',el.title);
     const marker = new instance.lib.Marker({element:el,anchor:'bottom'})
@@ -232,11 +237,13 @@ export default function(component) {
       instance.map.addSource('routes',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
       instance.map.addLayer({id:'reference-lines',type:'line',source:'routes',
         filter:['==',['get','kind'],'referencia'],
-        paint:{'line-color':'#f5a9d7','line-width':2,'line-dasharray':[2,2],'line-opacity':0.78}});
+        paint:{'line-color':['coalesce',['get','zone_color'],'#f5a9d7'],
+          'line-width':2,'line-dasharray':[2,2],'line-opacity':0.78}});
       instance.map.addLayer({id:'route-lines',type:'line',source:'routes',
         filter:['!=',['get','kind'],'referencia'],
         layout:{'line-cap':'round','line-join':'round'},
-        paint:{'line-color':'#59e6d5','line-width':4,'line-opacity':0.9}});
+        paint:{'line-color':['coalesce',['get','zone_color'],'#59e6d5'],
+          'line-width':4,'line-opacity':0.9}});
       instance.map.addSource('draft',{type:'geojson',data:{type:'FeatureCollection',features:[]}});
       instance.map.addLayer({id:'draft-line',type:'line',source:'draft',
         paint:{'line-color':'#ffe28a','line-width':3,'line-dasharray':[2,2]}});

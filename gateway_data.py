@@ -8,7 +8,8 @@ from xml.etree import ElementTree as ET
 from zipfile import BadZipFile, ZipFile
 
 
-REGIONS = ("Centro", "Cachipay", "Antioquia", "Norte", "Occidente", "Sur")
+REGIONS = ("Antioquia", "Cachipay", "Centro", "Norte", "Occidente", "Sur")
+KML_FOLDERS = (*REGIONS, "Medicion de la linea")
 KML_NS = "{http://www.opengis.net/kml/2.2}"
 MAX_KMZ_BYTES = 20 * 1024 * 1024
 MAX_KML_BYTES = 50 * 1024 * 1024
@@ -77,7 +78,7 @@ def load_private_kmz(path: str | Path) -> list[dict]:
 
     def walk(node: ET.Element, region: str = "Sin región") -> None:
         tag = node.tag.rsplit("}", 1)[-1]
-        if tag == "Folder" and _name(node) in REGIONS:
+        if tag == "Folder" and _name(node) in KML_FOLDERS:
             region = _name(node)
         if tag == "Placemark":
             name = _name(node)
