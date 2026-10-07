@@ -7,8 +7,8 @@ La sección Gateways usa MapLibre GL JS integrado con un componente bidirecciona
 de Streamlit. Permite filtrar por zona, activar capas, consultar puntos y
 dibujar puntos o rutas. Los trazos se conservan durante la sesión y pueden
 descargarse en GeoJSON. La aplicación pública no muestra puntos de muestra ni
-ubicaciones de la empresa: ningún KMZ, Excel o coordenada real se incluye en el
-repositorio.
+ubicaciones de la empresa. El KMZ de cobertura y el Excel de fincas de este
+proyecto no se incluyen en el repositorio.
 
 Para utilizar los datos reales, ejecuta la app **en un entorno privado** y
 establece `GATEWAYS_KMZ_PATH` y `GATEWAYS_XLSX_PATH` con las rutas absolutas antes
