@@ -10,7 +10,7 @@ from google import genai
 from google.genai import types
 from pypdf import PdfReader
 
-from ajedrez import render_chess
+from gateways import render_gateways
 
 # ============================================================
 # CONFIGURACIÓN
@@ -18,7 +18,7 @@ from ajedrez import render_chess
 st.set_page_config(
     page_title="Elite Flower Assistant",
     page_icon="🌸",
-    layout="centered",
+    layout="wide",
     initial_sidebar_state="collapsed",
 )
 
@@ -62,6 +62,7 @@ st.markdown(
         #05070b;
     color: #eef2ff;
 }
+.block-container { max-width: 1380px; padding-top: 1.5rem; padding-bottom: 4rem; }
 /* Oculta la barra lateral y su botón */
 section[data-testid="stSidebar"],
 div[data-testid="stSidebarCollapsedControl"],
@@ -74,6 +75,14 @@ div[data-testid="collapsedControl"] { display: none !important; }
 }
 .hero-sub { color: #929bb0; font-size: 15px; margin-top: 6px; }
 .neon { color: #ff4fc3; text-shadow: 0 0 12px rgba(255, 79, 195, .45); }
+.topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 12px 0 18px;
+    border-bottom: 1px solid rgba(255,255,255,.08); margin-bottom: 18px;
+}
+.topbar-brand { font-size: 13px; font-weight: 800; letter-spacing: .14em; color: #f8fafc; }
+.topbar-brand span { color: #ff4fc3; }
+.topbar-note { color: #8e9aaa; font-size: 12px; }
 .stButton > button {
     background: #0b1018; color: #00ffd5;
     border: 1px solid rgba(0,255,213,.35); border-radius: 10px;
@@ -271,6 +280,9 @@ docs_context = load_documents(files_signature(doc_files)) if doc_files else ""
 # ============================================================
 # ESTADO
 # ============================================================
+if "active_section" not in st.session_state:
+    st.session_state.active_section = "assistant"
+
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {
@@ -283,33 +295,45 @@ if "messages" not in st.session_state:
 # CABECERA
 # ============================================================
 st.markdown(
+    '<div class="topbar">'
+    '<div class="topbar-brand">ELITE FLOWER <span>●</span> WORKSPACE</div>'
+    '<div class="topbar-note">Asistente y operaciones geográficas</div>'
+    '</div>',
+    unsafe_allow_html=True,
+)
+
+left, assistant_nav, gateways_nav, right = st.columns([3, 1.35, 1.35, 3], gap="small")
+with assistant_nav:
+    if st.button(
+        "✦ Asistente",
+        key="nav_assistant",
+        type="primary" if st.session_state.active_section == "assistant" else "secondary",
+        width="stretch",
+    ):
+        st.session_state.active_section = "assistant"
+        st.rerun()
+with gateways_nav:
+    if st.button(
+        "◉ Gateways",
+        key="nav_gateways",
+        type="primary" if st.session_state.active_section == "gateways" else "secondary",
+        width="stretch",
+    ):
+        st.session_state.active_section = "gateways"
+        st.rerun()
+
+if st.session_state.active_section == "gateways":
+    render_gateways()
+    st.stop()
+
+st.markdown(
+    "<style>.block-container { max-width: 820px; }</style>"
     '<div class="hero">'
     '<div class="hero-title">ELITE FLOWER <span class="neon">AI ASSISTANT</span></div>'
     '<div class="hero-sub">Pregúntame lo que necesites</div>'
     "</div>",
     unsafe_allow_html=True,
 )
-
-# ============================================================
-# AJEDREZ (botón para abrir / volver)
-# ============================================================
-if "show_chess" not in st.session_state:
-    st.session_state.show_chess = False
-
-_, center, _ = st.columns([1, 2, 1])
-with center:
-    if st.session_state.show_chess:
-        if st.button("⬅️ Volver al asistente", use_container_width=True):
-            st.session_state.show_chess = False
-            st.rerun()
-    else:
-        if st.button("♟️ Jugar ajedrez", use_container_width=True):
-            st.session_state.show_chess = True
-            st.rerun()
-
-if st.session_state.show_chess:
-    render_chess()
-    st.stop()  # no mostrar el chat mientras se juega
 
 # ============================================================
 # CHAT
