@@ -2,3 +2,8 @@
 __pycache__/
 .env
 .venv/
+.private/
+*.kmz
+*.kml
+*.gpkg
+*.qgz
